@@ -126,8 +126,8 @@ def https_ping(host, host_header=None, sni=None, path='/', ip=None, protocol='ht
 
 # 사용 예:
 https_ping(
-    host="13.125.68.22",
-    host_header="www.test.com",
+    host="www.google.com",
+    host_header=None,
     sni=None,
     path="/",
     ip=None,
