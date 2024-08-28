@@ -134,5 +134,5 @@ https_ping(
     protocol="http",
     port=None,
     interval=1,
-    duration=60
+    duration=999999
 )
