@@ -1,3 +1,5 @@
+
+tee httptest.py << EOF
 import requests
 import time
 from datetime import datetime, timedelta
@@ -6,14 +8,22 @@ import ssl
 import warnings
 from urllib3.exceptions import InsecureRequestWarning
 import pytz
+from termcolor import colored
+import json
 
 warnings.simplefilter('ignore', InsecureRequestWarning)
 
 seoul_tz = pytz.timezone('Asia/Seoul')
 
-# 시간 포맷을 함수로 정의
 def format_time(dt):
     return dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-5]
+
+def update_downtime_file(downtime_periods, current_downtime_start):
+    with open('downtime.txt', 'w') as f:
+        json.dump({
+            'downtime_periods': [(format_time(start), format_time(end), duration) for start, end, duration in downtime_periods],
+            'current_downtime_start': format_time(current_downtime_start) if current_downtime_start else None
+        }, f, indent=2)
 
 def https_ping(host, host_header=None, sni=None, path='/', ip=None, protocol='https', port=None, interval=5, duration=60):
     if port is None:
@@ -32,15 +42,13 @@ def https_ping(host, host_header=None, sni=None, path='/', ip=None, protocol='ht
     downtime_periods = []
     current_downtime_start = None
     
-    print(f"Starting {protocol.upper()} ping to {host} (IP: {ip}) at {format_time(start_time)}")
-    print(f"URL: {url}")
-    print(f"Host header: {headers['Host']}")
-    if protocol == 'https':
-        print(f"SNI: {sni}")
-        print(f"SSL version: {ssl.OPENSSL_VERSION}")
-        print(f"Available ciphers: {', '.join(ssl.get_default_verify_paths())}")
-    print(f"Will run for {duration} seconds, pinging every {interval} seconds")
-    print("-" * 50)
+    print(colored(f"요청 시간: {format_time(start_time)}", "blue"))
+    print(colored(f"요청 도메인정보: {host}", "blue"))
+    print(colored(f"호스트 헤더 정보(옵션): {headers['Host']}", "blue"))
+    print(colored(f"SNI 정보(옵션): {sni}", "blue"))
+    print(colored(f"요청 ip정보 {protocol}://{ip}:{port}", "blue"))
+    print(colored(f"요청주기: {interval}초", "blue"))
+    print(colored("-" * 50, "white"))
 
     session = requests.Session()
     
@@ -64,53 +72,62 @@ def https_ping(host, host_header=None, sni=None, path='/', ip=None, protocol='ht
         session.mount('https://', CustomHTTPSAdapter(server_hostname=sni))
 
     while datetime.now(seoul_tz) < end_time:
+        print(colored(f"\n🕒 현재 시간: {format_time(datetime.now(seoul_tz))}", "blue"))
+        print(colored(f"🌐 요청 URL: {url}", "blue"))
+        print(colored(f"📋 요청 헤더: {headers}", "blue"))
+
         try:
-            print(f"{format_time(datetime.now(seoul_tz))} - Attempting connection...")
             ping_start = time.time()
             response = session.get(url, headers=headers, timeout=5, verify=True)
             ping_end = time.time()
             
             response_time = (ping_end - ping_start) * 1000
             
-            content_preview = response.text[:100] if response.text else "No content"
+            content_preview = response.text[:500] if response.text else "내용 없음"
             
-            print(f"{format_time(datetime.now(seoul_tz))} - Response code: {response.status_code}, Time: {response_time:.1f} ms")
-            print(f"Content preview: {content_preview}")
-            print(f"Response headers: {response.headers}")
+            print(colored(f"✅ 응답 코드: {response.status_code}", "green"))
+            print(colored(f"⏱️ 응답 시간: {response_time:.1f} ms", "cyan"))
+            print(colored(f"📄 응답 미리보기: {content_preview}", "yellow"))
             
             if current_downtime_start:
                 downtime_end = datetime.now(seoul_tz)
                 downtime_duration = (downtime_end - current_downtime_start).total_seconds()
                 downtime_periods.append((current_downtime_start, downtime_end, downtime_duration))
-                print(f"Connection restored. Downtime: {downtime_duration:.1f} seconds")
+                print(colored(f"🔄 연결 복구됨. 다운타임: {downtime_duration:.1f} 초", "green"))
                 current_downtime_start = None
             
             last_success = datetime.now(seoul_tz)
+            print(colored("🟢 통신 상태: 정상", "green"))
         
         except requests.RequestException as e:
-            print(f"{format_time(datetime.now(seoul_tz))} - Request failed: {str(e)}")
+            print(colored(f"❌ 요청 실패: {str(e)}", "red"))
             if isinstance(e, requests.exceptions.SSLError):
-                print(f"SSL Error details: {e.args[0]}")
+                print(colored(f"🔒 SSL 오류 상세: {e.args[0]}", "red"))
             elif isinstance(e, requests.exceptions.ConnectionError):
-                print(f"Connection Error details: {e.args[0]}")
+                print(colored(f"🔌 연결 오류 상세: {e.args[0]}", "red"))
             
             if not current_downtime_start:
                 current_downtime_start = datetime.now(seoul_tz)
+            print(colored("🔴 통신 상태: 비정상", "red"))
         
         except Exception as e:
-            print(f"{format_time(datetime.now(seoul_tz))} - Unexpected error: {str(e)}")
+            print(colored(f"❗ 예상치 못한 오류: {str(e)}", "red"))
             
             if not current_downtime_start:
                 current_downtime_start = datetime.now(seoul_tz)
+            print(colored("🔴 통신 상태: 비정상", "red"))
         
-        print(f"{format_time(datetime.now(seoul_tz))} - Waiting for next ping...")
-        print("Downtime periods:")
+        print(colored("⏳ 다운타임 기간:", "magenta"))
         for start, end, duration in downtime_periods:
-            print(f"  From {format_time(start)} to {format_time(end)} (Duration: {duration:.1f} seconds)")
+            print(colored(f"  {format_time(start)}부터 {format_time(end)}까지 (지속시간: {duration:.1f} 초)", "magenta"))
         if current_downtime_start:
             current_downtime_duration = (datetime.now(seoul_tz) - current_downtime_start).total_seconds()
-            print(f"  Current downtime started at {format_time(current_downtime_start)} (Duration so far: {current_downtime_duration:.1f} seconds)")
-        print("-" * 50)
+            print(colored(f"  현재 다운타임 시작: {format_time(current_downtime_start)} (현재까지 지속시간: {current_downtime_duration:.1f} 초)", "red"))
+        print(colored("-" * 50, "white"))
+
+        # 다운타임 정보를 파일로 export
+        update_downtime_file(downtime_periods, current_downtime_start)
+
         time.sleep(interval)
 
     if current_downtime_start:
@@ -118,11 +135,14 @@ def https_ping(host, host_header=None, sni=None, path='/', ip=None, protocol='ht
         downtime_duration = (downtime_end - current_downtime_start).total_seconds()
         downtime_periods.append((current_downtime_start, downtime_end, downtime_duration))
 
-    print("-" * 50)
-    print(f"{protocol.upper()} ping completed at {format_time(datetime.now(seoul_tz))}")
-    print("Final downtime periods:")
+    print(colored("-" * 50, "white"))
+    print(colored(f"{protocol.upper()} 핑 완료 시간: {format_time(datetime.now(seoul_tz))}", "blue"))
+    print(colored("📊 최종 다운타임 기간:", "magenta"))
     for start, end, duration in downtime_periods:
-        print(f"  From {format_time(start)} to {format_time(end)} (Duration: {duration:.1f} seconds)")
+        print(colored(f"  {format_time(start)}부터 {format_time(end)}까지 (지속시간: {duration:.1f} 초)", "magenta"))
+
+    # 최종 다운타임 정보를 파일로 export
+    update_downtime_file(downtime_periods, None)
 
 # 사용 예:
 https_ping(
@@ -136,3 +156,7 @@ https_ping(
     interval=1,
     duration=999999
 )
+EOF
+sudo yum install -y python3 pip
+pip install termcolor
+python3 httptest.py
